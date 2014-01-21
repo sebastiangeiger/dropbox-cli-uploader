@@ -3,7 +3,7 @@ require 'dropbox_sdk'
 require 'yaml'
 require 'logger'
 
-class MyDropboxClient
+class DropboxCliUploader
   CONFIG_FILE = 'config.yml'
   def initialize
     @log = Logger.new(STDOUT)
@@ -17,7 +17,7 @@ class MyDropboxClient
                 create_config_file
               end
     unless @config.has_key?(:access_token)
-      @config = write_config(sign_in(config))
+      @config = write_config(sign_in(@config))
     end
   end
 
@@ -30,8 +30,21 @@ class MyDropboxClient
   end
 
   def upload(path)
-    response = client.put_file("/#{path}", path)
-    @log.debug(response.inspect)
+    file_size = File.size(path)
+    megabytes = (file_size/(1024*1024))
+    dropbox_path = "/#{path}"
+    if megabytes < 10
+      @log.debug("Uploading #{path} via regular upload")
+      response = client.put_file(dropbox_path, path)
+      @log.debug(response.inspect)
+    else
+      @log.debug("Uploading #{path} via chunked upload")
+      file = File.open(path, "r")
+      uploader = DropboxClient::ChunkedUploader.new(client, file, file_size)
+      uploader.upload
+      @log.debug(uploader.finish(dropbox_path))
+    end
+    @log.info "Uploaded #{path} to #{dropbox_path}"
   end
 
   private
@@ -67,7 +80,9 @@ class MyDropboxClient
 end
 
 if __FILE__ == $0
-  client = MyDropboxClient.new
+  client = DropboxCliUploader.new
   client.sign_in_if_needed!
-  client.upload(ARGV.first)
+  ARGV.each do |file|
+    client.upload(file)
+  end
 end
